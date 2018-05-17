@@ -9,6 +9,10 @@ import (
 	"github.com/brutella/hc/log"
 	"github.com/brutella/hc/util"
 	"github.com/gosexy/to"
+	"crypto/sha512"
+	"encoding/base64"
+	"strconv"
+	"strings"
 )
 
 // Config provides  basic cfguration for an IP transport
@@ -38,6 +42,7 @@ type Config struct {
 	discoverable bool   // Flag if accessory is discoverable (sf)
 	mfiCompliant bool   // Flag if accessory if Mfi compliant (ff)
 	configHash   []byte
+	SetupId      string // Accessory setup id
 }
 
 func defaultConfig(name string) *Config {
@@ -58,7 +63,22 @@ func defaultConfig(name string) *Config {
 		protocol:     "1.0",
 		discoverable: true,
 		mfiCompliant: false,
+		SetupId:      "SETUP",
 	}
+}
+
+func (cfg Config) SetupURI() string {
+	code, _ := strconv.ParseUint(cfg.Pin, 10, 64)
+	category := uint64(1)
+	flags := uint64(2)
+	b36 := code | flags << 27 | category << 31
+
+	s := strings.ToUpper(strconv.FormatUint(b36, 36))
+	for len(s) < 9 {
+		s = "0" + s
+	}
+
+	return "X-HM://" + s + cfg.SetupId
 }
 
 // txtRecords returns the config formatted as mDNS txt records
@@ -72,7 +92,14 @@ func (cfg Config) txtRecords() map[string]string {
 		"ff": fmt.Sprintf("%d", to.Int64(cfg.mfiCompliant)),
 		"md": cfg.name,
 		"ci": fmt.Sprintf("%d", cfg.categoryId),
+		"sh": cfg.setupHash(),
 	}
+}
+
+func (cfg *Config) setupHash() string {
+	hash := cfg.SetupId + cfg.id
+	sum := sha512.Sum512([]byte(hash))
+	return base64.StdEncoding.EncodeToString(sum[:4])
 }
 
 // loads load the id, version and config hash
@@ -113,6 +140,10 @@ func (cfg *Config) merge(other Config) {
 
 	if ip := other.IP; len(ip) > 0 {
 		cfg.IP = ip
+	}
+
+	if setupid := other.SetupId; len(setupid) > 0 {
+		cfg.SetupId = setupid
 	}
 }
 
